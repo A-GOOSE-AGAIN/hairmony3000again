@@ -1,0 +1,27 @@
+HAIRMONY 3000 - Windows install
+================================
+
+1. Close your DAW.
+2. Copy the folder "HAIRMONY 3000.vst3" into:
+       C:\Program Files\Common Files\VST3\
+3. Open your DAW and rescan plugins. HAIRMONY 3000 appears under the
+   manufacturer "Hairmony Labs" (category: Fx / Vocals).
+
+"HAIRMONY 3000.exe" is a standalone version you can run without a DAW.
+
+Windows SmartScreen may warn the first time because the build isn't code-signed.
+Choose "More info" -> "Run anyway" for the standalone app; DAWs load the VST3
+without that prompt.
+
+Quick start
+-----------
+1. LOAD   - put HAIRMONY on your vocal track, press REC and play your DAW
+            (stop the DAW to finish the take) - or drop a vocal file on it.
+2. CRAFT  - set KEY and SCALE to your song, pick a choir, microphone and
+            VOICING (Full Harmony sings in parts), add Octave/3rd/5th stems
+            if you like, then press CREATE VOCALS.
+3. REVIEW - recorded takes play back in sync with your DAW (PLAY WITH DAW).
+            Audition each output, shape it with LO-CUT / BRIGHTNESS / REVERB,
+            or drag a tape icon (one stem) or the STEMS tile (all of them)
+            into your DAW. SAVE STEMS... writes them to a folder instead,
+            which is handy in hosts that don't accept drags from plugins.

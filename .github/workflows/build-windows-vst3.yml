@@ -1,0 +1,143 @@
+name: Build HAIRMONY 3000 (Windows VST3)
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # lets tagged builds attach the zip to a GitHub Release
+
+jobs:
+  windows:
+    name: Windows x64 - VST3 + Standalone
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Locate the project (works even if it's inside a sub-folder)
+        shell: bash
+        run: |
+          file=$(grep -rl --include=CMakeLists.txt "project (HAIRMONY3000" . 2>/dev/null | grep -v "/_deps/" | head -n 1 || true)
+          if [ -z "$file" ]; then
+            echo "::error::Couldn't find the HAIRMONY 3000 CMakeLists.txt anywhere in this repository."
+            echo "Upload the whole project (CMakeLists.txt, Source/, tests/, INSTALL.txt) - here is what the repo contains:"
+            find . -path ./.git -prune -o -print | head -n 200
+            exit 1
+          fi
+          dir=$(dirname "$file")
+          echo "Project found in: $dir"
+          echo "PROJECT_DIR=$dir" >> "$GITHUB_ENV"
+
+      - name: Configure (MSVC, x64)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: cmake -S . -B build -A x64 -DHAIRMONY_BUILD_TESTS=ON
+
+      - name: Build (Release)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: cmake --build build --config Release --parallel
+
+      - name: Run engine + plugin tests
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: ctest --test-dir build -C Release --output-on-failure --timeout 900
+
+      - name: Package
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item -Recurse "build/Hairmony_artefacts/Release/VST3/HAIRMONY 3000.vst3" dist/
+          Copy-Item "build/Hairmony_artefacts/Release/Standalone/HAIRMONY 3000.exe" dist/
+          Copy-Item INSTALL.txt dist/
+          Compress-Archive -Path dist/* -DestinationPath HAIRMONY-3000-Windows-x64.zip -Force
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: HAIRMONY-3000-Windows-x64
+          path: ${{ env.PROJECT_DIR }}/HAIRMONY-3000-Windows-x64.zip
+          if-no-files-found: error
+
+      - name: Validate the VST3 with pluginval (strictness 10)
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip" -OutFile pluginval.zip
+          Expand-Archive pluginval.zip -DestinationPath pluginval -Force
+          $vst3 = "build/Hairmony_artefacts/Release/VST3/HAIRMONY 3000.vst3"
+          ./pluginval/pluginval.exe --strictness-level 10 --verbose --timeout-ms 900000 --output-dir pluginval-logs --validate "$vst3" 2>&1 | Out-Host
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Write-Host "::error::pluginval exited with code $code - full report follows"
+            Get-ChildItem -Recurse pluginval-logs -File -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "===== $($_.FullName) ====="
+              Get-Content $_.FullName -Tail 200 | Out-Host
+            }
+            exit 1
+          }
+
+      - name: Upload pluginval logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pluginval-logs
+          path: ${{ env.PROJECT_DIR }}/pluginval-logs
+          if-no-files-found: ignore
+
+      - name: Attach to GitHub Release (tags starting with v)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.PROJECT_DIR }}/HAIRMONY-3000-Windows-x64.zip
+
+  linux-tests:
+    # Same test suites on Linux (headless, via Xvfb) - a quick second opinion on every push.
+    name: Linux - tests + pluginval
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate the project (works even if it's inside a sub-folder)
+        shell: bash
+        run: |
+          file=$(grep -rl --include=CMakeLists.txt "project (HAIRMONY3000" . 2>/dev/null | grep -v "/_deps/" | head -n 1 || true)
+          if [ -z "$file" ]; then
+            echo "::error::Couldn't find the HAIRMONY 3000 CMakeLists.txt anywhere in this repository."
+            echo "Upload the whole project (CMakeLists.txt, Source/, tests/, INSTALL.txt) - here is what the repo contains:"
+            find . -path ./.git -prune -o -print | head -n 200
+            exit 1
+          fi
+          dir=$(dirname "$file")
+          echo "Project found in: $dir"
+          echo "PROJECT_DIR=$dir" >> "$GITHUB_ENV"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libasound2-dev libx11-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxext-dev libfreetype-dev libfontconfig1-dev libgl1-mesa-dev xvfb
+
+      - name: Configure
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DHAIRMONY_BUILD_TESTS=ON
+
+      - name: Build
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: cmake --build build --parallel
+
+      - name: Tests
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: xvfb-run -a ctest --test-dir build --output-on-failure --timeout 900
+
+      - name: pluginval
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip
+          unzip -q pluginval.zip
+          xvfb-run -a ./pluginval --strictness-level 10 --verbose --timeout-ms 900000 --validate "build/Hairmony_artefacts/Release/VST3/HAIRMONY 3000.vst3"
